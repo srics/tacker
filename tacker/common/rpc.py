@@ -52,8 +52,8 @@ def init(conf):
     global TRANSPORT, NOTIFIER
     exmods = get_allowed_exmods()
     TRANSPORT = oslo_messaging.get_transport(conf,
-                                        allowed_remote_exmods=exmods,
-                                        aliases=TRANSPORT_ALIASES)
+                                             allowed_remote_exmods=exmods,
+                                             aliases=TRANSPORT_ALIASES)
     NOTIFIER = oslo_messaging.Notifier(TRANSPORT)
 
 
@@ -77,25 +77,6 @@ def get_allowed_exmods():
     return ALLOWED_EXMODS + EXTRA_EXMODS
 
 
-def get_client(target, version_cap=None, serializer=None):
-    assert TRANSPORT is not None
-    serializer = PluginRpcSerializer(serializer)
-    return oslo_messaging.RPCClient(TRANSPORT,
-                               target,
-                               version_cap=version_cap,
-                               serializer=serializer)
-
-
-def get_server(target, endpoints, serializer=None):
-    assert TRANSPORT is not None
-    serializer = PluginRpcSerializer(serializer)
-    return oslo_messaging.get_rpc_server(TRANSPORT,
-                                    target,
-                                    endpoints,
-                                    executor='eventlet',
-                                    serializer=serializer)
-
-
 def get_notifier(service=None, host=None, publisher_id=None):
     assert NOTIFIER is not None
     if not publisher_id:
@@ -104,7 +85,9 @@ def get_notifier(service=None, host=None, publisher_id=None):
 
 
 class PluginRpcSerializer(om_serializer.Serializer):
-    """This serializer is used to convert RPC common context into
+    """Serializer.
+
+    This serializer is used to convert RPC common context into
     Tacker Context.
     """
     def __init__(self, base):

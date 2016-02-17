@@ -1,8 +1,6 @@
 # vim: tabstop=4 shiftwidth=4 softtabstop=4
 #
 # Copyright 2015 Intel Corporation.
-# Copyright 2015 Isaku Yamahata <isaku.yamahata at intel com>
-#                               <isaku.yamahata at gmail com>
 # All Rights Reserved.
 #
 #
@@ -17,19 +15,16 @@
 #    WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
 #    License for the specific language governing permissions and limitations
 #    under the License.
-#
-# @author: Isaku Yamahata, Intel Corporation.
-# shamelessly many codes are stolen from gbp simplechain_driver.py
 
 import sys
 import time
+
+from heatclient import exc as heatException
+from oslo_config import cfg
+from toscaparser.utils import yamlparser
 import yaml
 
-from heatclient import client as heat_client
-from heatclient import exc as heatException
-from keystoneclient.v2_0 import client as ks_client
-from oslo_config import cfg
-
+from tacker.common import clients
 from tacker.common import log
 from tacker.extensions import vnfm
 from tacker.openstack.common import jsonutils
@@ -40,21 +35,18 @@ from tacker.vm.drivers import abstract_driver
 LOG = logging.getLogger(__name__)
 CONF = cfg.CONF
 OPTS = [
-    cfg.StrOpt('heat_uri',
-               default='http://localhost:8004/v1',
-               help=_("Heat server address to create services "
-                      "specified in the service chain.")),
     cfg.IntOpt('stack_retries',
-               default=10,
-               help=_("Number of attempts to retry for stack deletion")),
+               default=60,
+               help=_("Number of attempts to retry for stack"
+                      "creation/deletion")),
     cfg.IntOpt('stack_retry_wait',
                default=5,
-               help=_("Wait time between two successive stack delete "
-                      "retries")),
+               help=_("Wait time between two successive stack"
+                      "create/delete retries")),
 ]
-CONF.register_opts(OPTS, group='servicevm_heat')
-STACK_RETRIES = cfg.CONF.servicevm_heat.stack_retries
-STACK_RETRY_WAIT = cfg.CONF.servicevm_heat.stack_retry_wait
+CONF.register_opts(OPTS, group='tacker_heat')
+STACK_RETRIES = cfg.CONF.tacker_heat.stack_retries
+STACK_RETRY_WAIT = cfg.CONF.tacker_heat.stack_retry_wait
 
 HEAT_TEMPLATE_BASE = """
 heat_template_version: 2013-05-23
@@ -89,7 +81,7 @@ class DeviceHeat(abstract_driver.DeviceAbstractDriver):
 
         device_template_dict.update(
             dict((key, vnfd_dict[vnfd_key]) for (key, vnfd_key) in KEY_LIST
-                 if ((not key in device_template_dict or
+                 if ((key not in device_template_dict or
                       device_template_dict[key] == '') and
                      vnfd_key in vnfd_dict and
                      vnfd_dict[vnfd_key] != '')))
@@ -119,13 +111,13 @@ class DeviceHeat(abstract_driver.DeviceAbstractDriver):
                         self._update_params(value, paramvalues[key], False)
                     else:
                         LOG.debug('Key missing Value: %s', key)
-                        raise vnfm.InputValuesMissing()
+                        raise vnfm.InputValuesMissing(key=key)
                 elif 'get_input' in value:
                     if value['get_input'] in paramvalues:
                         original[key] = paramvalues[value['get_input']]
                     else:
                         LOG.debug('Key missing Value: %s', key)
-                        raise vnfm.InputValuesMissing()
+                        raise vnfm.InputValuesMissing(key=key)
                 else:
                     self._update_params(value, paramvalues, True)
 
@@ -181,8 +173,7 @@ class DeviceHeat(abstract_driver.DeviceAbstractDriver):
             return port
 
         networks_list = []
-        outputs_dict = {}
-        template_dict['outputs'] = outputs_dict
+        outputs_dict = template_dict['outputs']
         properties['networks'] = networks_list
         for network_param in vdu_dict[
                 'network_interfaces'].values():
@@ -199,7 +190,7 @@ class DeviceHeat(abstract_driver.DeviceAbstractDriver):
                 network_param = {
                     'port': {'get_resource': port}
                 }
-            networks_list.append(network_param)
+            networks_list.append(dict(network_param))
 
     @log.log
     def create(self, plugin, context, device):
@@ -216,7 +207,6 @@ class DeviceHeat(abstract_driver.DeviceAbstractDriver):
 
         # overwrite parameters with given dev_attrs for device creation
         dev_attrs = device['attributes'].copy()
-        config_yaml = dev_attrs.pop('config', None)
         fields.update(dict((key, dev_attrs.pop(key)) for key
                       in ('stack_name', 'template_url', 'template')
                       if key in dev_attrs))
@@ -233,7 +223,7 @@ class DeviceHeat(abstract_driver.DeviceAbstractDriver):
             outputs_dict = {}
             template_dict['outputs'] = outputs_dict
 
-            vnfd_dict = yaml.load(vnfd_yaml)
+            vnfd_dict = yamlparser.simple_ordered_parse(vnfd_yaml)
             LOG.debug('vnfd_dict %s', vnfd_dict)
 
             if 'get_input' in vnfd_yaml:
@@ -244,6 +234,8 @@ class DeviceHeat(abstract_driver.DeviceAbstractDriver):
             for (key, vnfd_key) in KEY_LIST:
                 if vnfd_key in vnfd_dict:
                     template_dict[key] = vnfd_dict[vnfd_key]
+
+            monitoring_dict = {'vdus': {}}
 
             for vdu_id, vdu_dict in vnfd_dict.get('vdus', {}).items():
                 template_dict.setdefault('resources', {})[vdu_id] = {
@@ -267,7 +259,7 @@ class DeviceHeat(abstract_driver.DeviceAbstractDriver):
                 elif 'user_data' in vdu_dict or 'user_data_format' in vdu_dict:
                     raise vnfm.UserDataFormatNotFound()
                 if ('placement_policy' in vdu_dict and
-                    'availability_zone' in vdu_dict['placement_policy']):
+                        'availability_zone' in vdu_dict['placement_policy']):
                     properties['availability_zone'] = vdu_dict[
                         'placement_policy']['availability_zone']
                 if 'config' in vdu_dict:
@@ -277,31 +269,33 @@ class DeviceHeat(abstract_driver.DeviceAbstractDriver):
                     for key, value in metadata.items():
                         metadata[key] = value[:255]
 
-                # monitoring_policy = vdu_dict.get('monitoring_policy', None)
-                # failure_policy = vdu_dict.get('failure_policy', None)
+                monitoring_policy = vdu_dict.get('monitoring_policy', 'noop')
+                failure_policy = vdu_dict.get('failure_policy', 'noop')
+
+                # Convert the old monitoring specification to the new format
+                # This should be removed after Mitaka
+                if monitoring_policy == 'ping' and failure_policy == 'respawn':
+                    vdu_dict['monitoring_policy'] = {'ping': {
+                                                     'actions':
+                                                     {
+                                                         'failure': 'respawn'
+                                                     }}}
+                    vdu_dict.pop('failure_policy')
+
+                if monitoring_policy != 'noop':
+                    monitoring_dict['vdus'][vdu_id] = \
+                        vdu_dict['monitoring_policy']
 
                 # to pass necessary parameters to plugin upwards.
-                for key in ('monitoring_policy', 'failure_policy',
-                            'service_type'):
+                for key in ('service_type',):
                     if key in vdu_dict:
                         device.setdefault(
-                            'attributes', {})[key] = vdu_dict[key]
+                            'attributes', {})[vdu_id] = jsonutils.dumps(
+                                {key: vdu_dict[key]})
 
-            if config_yaml is not None:
-                config_dict = yaml.load(config_yaml)
-                resources = template_dict.setdefault('resources', {})
-                for vdu_id, vdu_dict in config_dict.get('vdus', {}).items():
-                    if vdu_id not in resources:
-                        continue
-                    config = vdu_dict.get('config', None)
-                    if not config:
-                        continue
-                    properties = resources[vdu_id].setdefault('properties', {})
-                    properties['config_drive'] = True
-                    metadata = properties.setdefault('metadata', {})
-                    metadata.update(config)
-                    for key, value in metadata.items():
-                        metadata[key] = value[:255]
+            if monitoring_dict.keys():
+                device['attributes']['monitoring_policy'] = jsonutils.dumps(
+                    monitoring_dict)
 
             heat_template_yaml = yaml.dump(template_dict)
             fields['template'] = heat_template_yaml
@@ -346,11 +340,11 @@ class DeviceHeat(abstract_driver.DeviceAbstractDriver):
         LOG.debug(_('stack status: %(stack)s %(status)s'),
                   {'stack': str(stack), 'status': status})
         if stack_retries == 0:
-            LOG.warn(_("Resource creation is"
-                       " not completed within %(wait)s seconds as "
-                       "creation of Stack %(stack)s is not completed"),
-                     {'wait': (STACK_RETRIES * STACK_RETRY_WAIT),
-                      'stack': device_id})
+            LOG.warning(_("Resource creation is"
+                          " not completed within %(wait)s seconds as "
+                          "creation of Stack %(stack)s is not completed"),
+                        {'wait': (STACK_RETRIES * STACK_RETRY_WAIT),
+                         'stack': device_id})
         if status != 'CREATE_COMPLETE':
             raise vnfm.DeviceCreateWaitFailed(device_id=device_id)
         outputs = stack.outputs
@@ -374,7 +368,13 @@ class DeviceHeat(abstract_driver.DeviceAbstractDriver):
         update_yaml = device['device'].get('attributes', {}).get('config', '')
         LOG.debug('yaml orig %(orig)s update %(update)s',
                   {'orig': config_yaml, 'update': update_yaml})
-        config_dict = yaml.load(config_yaml) or {}
+
+        # If config_yaml is None, yaml.load() will raise Attribute Error.
+        # So set config_yaml to {}, if it is None.
+        if not config_yaml:
+            config_dict = {}
+        else:
+            config_dict = yaml.load(config_yaml) or {}
         update_dict = yaml.load(update_yaml)
         if not update_dict:
             return
@@ -429,15 +429,15 @@ class DeviceHeat(abstract_driver.DeviceAbstractDriver):
             stack_retries = stack_retries - 1
 
         if stack_retries == 0:
-            LOG.warn(_("Resource cleanup for device is"
-                       " not completed within %(wait)s seconds as "
-                       "deletion of Stack %(stack)s is not completed"),
-                     {'wait': (STACK_RETRIES * STACK_RETRY_WAIT),
-                      'stack': device_id})
+            LOG.warning(_("Resource cleanup for device is"
+                          " not completed within %(wait)s seconds as "
+                          "deletion of Stack %(stack)s is not completed"),
+                        {'wait': (STACK_RETRIES * STACK_RETRY_WAIT),
+                         'stack': device_id})
         if status != 'DELETE_COMPLETE':
-            LOG.warn(_("device (%(device_id)d) deletion is not completed. "
-                       "%(stack_status)s"),
-                     {'device_id': device_id, 'stack_status': status})
+            LOG.warning(_("device (%(device_id)d) deletion is not completed. "
+                          "%(stack_status)s"),
+                        {'device_id': device_id, 'stack_status': status})
 
     @log.log
     def attach_interface(self, plugin, context, device_id, port_id):
@@ -448,28 +448,10 @@ class DeviceHeat(abstract_driver.DeviceAbstractDriver):
         raise NotImplementedError()
 
 
-class HeatClient:
+class HeatClient(object):
     def __init__(self, context, password=None):
         # context, password are unused
-        auth_url = CONF.keystone_authtoken.auth_uri + '/v2.0'
-        authtoken = CONF.keystone_authtoken
-        kc = ks_client.Client(
-            tenant_name=authtoken.project_name,
-            username=authtoken.username,
-            password=authtoken.password,
-            auth_url=auth_url)
-        token = kc.service_catalog.get_token()
-
-        api_version = "1"
-        endpoint = "%s/%s" % (cfg.CONF.servicevm_heat.heat_uri,
-                              token['tenant_id'])
-        kwargs = {
-            'token': token['id'],
-            'tenant_name': authtoken.project_name,
-            'username': authtoken.username,
-        }
-        self.client = heat_client.Client(api_version, endpoint, **kwargs)
-        self.stacks = self.client.stacks
+        self.stacks = clients.OpenstackClients().heat.stacks
 
     def create(self, fields):
         fields = fields.copy()
@@ -489,8 +471,8 @@ class HeatClient:
         try:
             self.stacks.delete(stack_id)
         except heatException.HTTPNotFound:
-            LOG.warn(_("Stack %(stack)s created by service chain driver is "
-                       "not found at cleanup"), {'stack': stack_id})
+            LOG.warning(_("Stack %(stack)s created by service chain driver is "
+                          "not found at cleanup"), {'stack': stack_id})
 
     def get(self, stack_id):
         return self.stacks.get(stack_id)

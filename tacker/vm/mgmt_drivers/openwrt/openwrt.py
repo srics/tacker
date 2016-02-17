@@ -15,12 +15,9 @@
 #    WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
 #    License for the specific language governing permissions and limitations
 #    under the License.
-#
-# @author: Isaku Yamahata, Intel Corporation.
-
-import yaml
 
 from oslo_config import cfg
+import yaml
 
 from tacker.agent.linux import utils
 from tacker.common import log
@@ -65,12 +62,10 @@ class DeviceMgmtOpenWRT(abstract_driver.DeviceMGMTAbstractDriver):
     @log.log
     def mgmt_call(self, plugin, context, device, kwargs):
         if (kwargs[mgmt_constants.KEY_ACTION] !=
-            mgmt_constants.ACTION_UPDATE_DEVICE):
+                mgmt_constants.ACTION_UPDATE_DEVICE):
             return
         dev_attrs = device.get('attributes', {})
-        service_type = dev_attrs.get('service_type')
-        if not service_type:
-            return
+
         mgmt_url = jsonutils.loads(device.get('mgmt_url', '{}'))
         if not mgmt_url:
             return
@@ -88,18 +83,8 @@ class DeviceMgmtOpenWRT(abstract_driver.DeviceMGMTAbstractDriver):
                     continue
                 mgmt_ip_address = mgmt_url.get(vdu, '')
                 if not mgmt_ip_address:
-                    LOG.warn(_('tried to configure unknown mgmt address %s'),
-                             vdu)
+                    LOG.warning(_('tried to configure unknown mgmt '
+                                  'address %s'),
+                                vdu)
                     continue
                 self._config_service(mgmt_ip_address, key, conf_value)
-
-    def mgmt_service_address(self, plugin, context,
-                             device, service_instance):
-        LOG.debug(_('mgmt_service_address %(device)s %(service_instance)s'),
-                  {'device': device, 'service_instance': service_instance})
-        return 'noop-mgmt-service-address'
-
-    def mgmt_service_call(self, plugin, context, device,
-                          service_instance, kwargs):
-        LOG.debug(_('mgmt_service_call %(device)s %(service_instance)s'),
-                  {'device': device, 'service_instance': service_instance})

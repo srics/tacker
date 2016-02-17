@@ -30,19 +30,23 @@ LOG = logging.getLogger(__name__)
 
 
 class InfraDriverNotSpecified(exceptions.InvalidInput):
-    message = _('infra driver is not speicfied')
+    message = _('infra driver is not specified')
+
+
+class MGMTDriverNotSpecified(exceptions.InvalidInput):
+    message = _('mgmt driver is not specified')
 
 
 class ServiceTypesNotSpecified(exceptions.InvalidInput):
-    message = _('service types are not speicfied')
+    message = _('service types are not specified')
 
 
 class DeviceTemplateInUse(exceptions.InUse):
-    message = _('device template %(device_template_id)s is still in use')
+    message = _('VNFD %(device_template_id)s is still in use')
 
 
 class DeviceInUse(exceptions.InUse):
-    message = _('Device %(device_id)s is still in use')
+    message = _('VNF %(device_id)s is still in use')
 
 
 class InvalidInfraDriver(exceptions.InvalidInput):
@@ -54,40 +58,27 @@ class InvalidServiceType(exceptions.InvalidInput):
 
 
 class DeviceCreateFailed(exceptions.TackerException):
-    message = _('creating device based on %(device_template_id)s failed')
+    message = _('creating VNF based on %(device_template_id)s failed')
 
 
 class DeviceCreateWaitFailed(exceptions.TackerException):
-    message = _('waiting for creation of device %(device_id)s failed')
+    message = _('waiting for creation of VNF %(device_id)s failed')
 
 
 class DeviceDeleteFailed(exceptions.TackerException):
-    message = _('deleting device %(device_id)s failed')
+    message = _('deleting VNF %(device_id)s failed')
 
 
 class DeviceTemplateNotFound(exceptions.NotFound):
-    message = _('device template %(device_tempalte_id)s could not be found')
+    message = _('VNFD template %(device_tempalte_id)s could not be found')
 
 
-class SeviceTypeNotFound(exceptions.NotFound):
+class ServiceTypeNotFound(exceptions.NotFound):
     message = _('service type %(service_type_id)s could not be found')
 
 
 class DeviceNotFound(exceptions.NotFound):
-    message = _('device %(device_id)s could not be found')
-
-
-class ServiceInstanceNotManagedByUser(exceptions.InUse):
-    message = _('service instance %(service_instance_id)s is '
-                'managed by other service')
-
-
-class ServiceInstanceInUse(exceptions.InUse):
-    message = _('service instance %(service_instance_id)s is still in use')
-
-
-class ServiceInstanceNotFound(exceptions.NotFound):
-    message = _('service instance %(service_instance_id)s could not be found')
+    message = _('VNF %(device_id)s could not be found')
 
 
 class ParamYAMLNotWellFormed(exceptions.InvalidInput):
@@ -95,7 +86,7 @@ class ParamYAMLNotWellFormed(exceptions.InvalidInput):
 
 
 class InputValuesMissing(exceptions.InvalidInput):
-    message = _("Input values missing for 'get_input")
+    message = _("Parameter input values missing for the key '%(key)s'")
 
 
 class ParamYAMLInputMissing(exceptions.InvalidInput):
@@ -135,30 +126,8 @@ def _validate_service_type_list(data, valid_values=None):
             return msg
 
 
-def _validate_service_context_list(data, valid_values=None):
-    if not isinstance(data, list):
-        msg = _("invalid data format for service context list: '%s'") % data
-        LOG.debug(msg)
-        return msg
-
-    key_specs = {
-        'network_id': {'type:uuid': None},
-        'subnet_id': {'type:uuid': None},
-        'port_id': {'type:uuid': None},
-        'router_id': {'type:uuid': None},
-        'role': {'type:string': None},
-        'index': {'type:non_negative': None,
-                  'convert_to': attr.convert_to_int},
-    }
-    for sc_entry in data:
-        msg = attr._validate_dict_or_empty(sc_entry, key_specs=key_specs)
-        if msg:
-            LOG.debug(msg)
-            return msg
-
-
 attr.validators['type:service_type_list'] = _validate_service_type_list
-attr.validators['type:service_context_list'] = _validate_service_context_list
+
 
 RESOURCE_ATTRIBUTE_MAP = {
 
@@ -277,142 +246,6 @@ RESOURCE_ATTRIBUTE_MAP = {
             'is_visible': True,
             'default': {},
         },
-        'service_contexts': {
-            'allow_post': True,
-            'allow_put': False,
-            'validate': {'type:service_context_list': None},
-            'is_visible': True,
-            'default': [],
-        },
-        'status': {
-            'allow_post': False,
-            'allow_put': False,
-            'is_visible': True,
-        },
-    },
-
-    'device_templates': {
-        'id': {
-            'allow_post': False,
-            'allow_put': False,
-            'validate': {'type:uuid': None},
-            'is_visible': True,
-            'primary_key': True,
-        },
-        'tenant_id': {
-            'allow_post': True,
-            'allow_put': False,
-            'validate': {'type:string': None},
-            'required_by_policy': True,
-            'is_visible': True,
-        },
-        'name': {
-            'allow_post': True,
-            'allow_put': True,
-            'validate': {'type:string': None},
-            'is_visible': True,
-            'default': '',
-        },
-        'description': {
-            'allow_post': True,
-            'allow_put': True,
-            'validate': {'type:string': None},
-            'is_visible': True,
-            'default': '',
-        },
-        'service_types': {
-            'allow_post': True,
-            'allow_put': False,
-            'convert_to': attr.convert_to_list,
-            'validate': {'type:service_type_list': None},
-            'is_visible': True,
-            'default': attr.ATTR_NOT_SPECIFIED,
-        },
-        'infra_driver': {
-            'allow_post': True,
-            'allow_put': False,
-            'validate': {'type:string': None},
-            'is_visible': True,
-            'default': attr.ATTR_NOT_SPECIFIED,
-        },
-        'mgmt_driver': {
-            'allow_post': True,
-            'allow_put': False,
-            'validate': {'type:string': None},
-            'is_visible': True,
-            'default': attr.ATTR_NOT_SPECIFIED,
-        },
-        'attributes': {
-            'allow_post': True,
-            'allow_put': False,
-            'convert_to': attr.convert_none_to_empty_dict,
-            'validate': {'type:dict_or_nodata': None},
-            'is_visible': True,
-            'default': None,
-        },
-    },
-
-    'devices': {
-        'id': {
-            'allow_post': False,
-            'allow_put': False,
-            'validate': {'type:uuid': None},
-            'is_visible': True,
-            'primary_key': True
-        },
-        'tenant_id': {
-            'allow_post': True,
-            'allow_put': False,
-            'validate': {'type:string': None},
-            'required_by_policy': True,
-            'is_visible': True
-        },
-        'template_id': {
-            'allow_post': True,
-            'allow_put': False,
-            'validate': {'type:uuid': None},
-            'is_visible': True,
-        },
-        'name': {
-            'allow_post': True,
-            'allow_put': True,
-            'validate': {'type:string': None},
-            'is_visible': True,
-            'default': '',
-        },
-        'description': {
-            'allow_post': True,
-            'allow_put': True,
-            'validate': {'type:string': None},
-            'is_visible': True,
-            'default': '',
-        },
-        'instance_id': {
-            'allow_post': False,
-            'allow_put': False,
-            'validate': {'type:string': None},
-            'is_visible': True,
-        },
-        'mgmt_url': {
-            'allow_post': False,
-            'allow_put': False,
-            'validate': {'type:string': None},
-            'is_visible': True,
-        },
-        'attributes': {
-            'allow_post': True,
-            'allow_put': True,
-            'validate': {'type:dict_or_none': None},
-            'is_visible': True,
-            'default': {},
-        },
-        'service_contexts': {
-            'allow_post': True,
-            'allow_put': False,
-            'validate': {'type:service_context_list': None},
-            'is_visible': True,
-            'default': [],
-        },
         'status': {
             'allow_post': False,
             'allow_put': False,
@@ -420,6 +253,11 @@ RESOURCE_ATTRIBUTE_MAP = {
         },
     },
 }
+
+# Note, device_templates and devices are for back compatible
+# will be removed in N cycle
+RESOURCE_ATTRIBUTE_MAP['device_templates'] = RESOURCE_ATTRIBUTE_MAP['vnfds']
+RESOURCE_ATTRIBUTE_MAP['devices'] = RESOURCE_ATTRIBUTE_MAP['vnfs']
 
 
 class Vnfm(extensions.ExtensionDescriptor):
@@ -449,7 +287,6 @@ class Vnfm(extensions.ExtensionDescriptor):
         plural_mappings = resource_helper.build_plural_mappings(
             special_mappings, RESOURCE_ATTRIBUTE_MAP)
         plural_mappings['service_types'] = 'service_type'
-        plural_mappings['service_contexts'] = 'service_context'
         attr.PLURALS.update(plural_mappings)
         return resource_helper.build_resource_info(
             plural_mappings, RESOURCE_ATTRIBUTE_MAP, constants.VNFM,

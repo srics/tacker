@@ -92,15 +92,15 @@ def get_limit_and_marker(request):
 def _get_pagination_max_limit():
     max_limit = -1
     if (cfg.CONF.pagination_max_limit.lower() !=
-        constants.PAGINATION_INFINITE):
+            constants.PAGINATION_INFINITE):
         try:
             max_limit = int(cfg.CONF.pagination_max_limit)
             if max_limit == 0:
                 raise ValueError()
         except ValueError:
-            LOG.warn(_("Invalid value for pagination_max_limit: %s. It "
-                       "should be an integer greater to 0"),
-                     cfg.CONF.pagination_max_limit)
+            LOG.warning(_("Invalid value for pagination_max_limit: %s. It "
+                          "should be an integer greater to 0"),
+                        cfg.CONF.pagination_max_limit)
     return max_limit
 
 
@@ -280,6 +280,7 @@ class SortingEmulatedHelper(SortingHelper):
 class SortingNativeHelper(SortingHelper):
 
     def __init__(self, request, attr_info):
+        super(SortingNativeHelper, self).__init__(request, attr_info)
         self.sort_dict = get_sorts(request, attr_info)
 
     def update_args(self, args):

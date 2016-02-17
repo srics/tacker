@@ -25,7 +25,7 @@
 # - stop_tacker
 # - cleanup_tacker
 
-# Tacker SeviceVM
+# Tacker
 # ---------------
 
 # Save trace setting
@@ -40,11 +40,11 @@ if is_ssl_enabled_service "tacker" || is_service_enabled tls-proxy; then
 fi
 
 # Set up default directories
-GITREPO["python-tackerclient"]=${TACKERCLIENT_REPO:-${GIT_BASE}/stackforge/python-tackerclient.git}
+GITREPO["python-tackerclient"]=${TACKERCLIENT_REPO:-${GIT_BASE}/openstack/python-tackerclient.git}
 GITBRANCH["python-tackerclient"]=${TACKERCLIENT_BRANCH:-master}
 GITDIR["python-tackerclient"]=$DEST/python-tackerclient
 
-GITREPO["tacker-horizon"]=${TACKERHORIZON_REPO:-${GIT_BASE}/stackforge/tacker-horizon.git}
+GITREPO["tacker-horizon"]=${TACKERHORIZON_REPO:-${GIT_BASE}/openstack/tacker-horizon.git}
 GITBRANCH["tacker-horizon"]=${TACKERHORZION_BRANCH:-master}
 GITDIR["tacker-horizon"]=$DEST/tacker-horizon
 
@@ -117,18 +117,13 @@ function create_tacker_cache_dir {
 # Migrated from keystone_data.sh
 function create_tacker_accounts {
     if is_service_enabled tacker; then
-        # openstack user create tacker --password service-password
-        # openstack role add admin --user <uuid> --project service
         create_service_user "tacker"
         get_or_create_role "advsvc"
         create_service_user "tacker" "advsvc"
 
         if [[ "$KEYSTONE_CATALOG_BACKEND" = 'sql' ]]; then
-
-            # openstack service create servicevm --name tacker '--description=tacker Service'
             local tacker_service=$(get_or_create_service "tacker" \
-                "servicevm" "Tacker Service")
-            # openstack endpoint create <uuid of service> --region RegionOne --publicurl 'http://143.183.96.146:8888/' --adminurl 'http://143.183.96.146:8888/' --internalurl 'http://143.183.96.146:8888/'
+                "nfv-orchestration" "Tacker NFV Orchestration Service")
             get_or_create_endpoint $tacker_service \
                 "$REGION_NAME" \
                 "$TACKER_PROTOCOL://$SERVICE_HOST:$TACKER_PORT/" \
@@ -143,8 +138,6 @@ function create_tacker_accounts {
 
 # init_tacker() - Initialize databases, etc.
 function init_tacker {
-    # mysql -uroot -pmysql-password -h143.183.96.146 -e 'DROP DATABASE IF EXISTS tacker;'
-    # mysql -uroot -pmysql-password -h143.183.96.146 -e 'CREATE DATABASE tacker CHARACTER SET utf8;'
     recreate_database $TACKER_DB_NAME
 
     # Run Tacker db migrations
@@ -153,7 +146,6 @@ function init_tacker {
 
 # install_tacker() - Collect source and prepare
 function install_tacker {
-    #git_clone $TACKER_REPO $TACKER_DIR $TACKER_BRANCH
     setup_develop $TACKER_DIR
 }
 
@@ -188,24 +180,9 @@ function start_tacker_api {
     fi
 }
 
-# TODO
-# Start running processes, including screen
-function start_tacker_agents {
-    # TODO
-    return
-
-    # Start up the tacker agents if enabled
-    run_process q-agt "python $AGENT_BINARY --config-file $TACKER_CONF"
-
-    if is_service_enabled q-servicevm-agent; then
-        screen_it q-servicevm "cd $TACKER_DIR && python $AGENT_SERVICEVM_BINARY --config-file $TACKER_CONF --config-file $SERVICEVM_CONF_FILENAME"
-    fi
-}
-
 # stop_tacker() - Stop running processes (non-screen)
 function stop_tacker {
-    stop_process tacker-svc
-    # stop_process q-agt
+    stop_process tacker
 }
 
 # cleanup_tacker() - Remove residual data files, anything left over from previous
@@ -284,18 +261,18 @@ function configure_tacker {
     iniset $TACKER_CONF DEFAULT nova_api_insecure $TACKER_NOVA_API_INSECURE
     iniset $TACKER_CONF DEFAULT nova_region_name $REGION_NAME
 
-    iniset $TACKER_CONF servicevm_nova auth_plugin password
-    iniset $TACKER_CONF servicevm_nova auth_url $KEYSTONE_AUTH_URI
-    iniset $TACKER_CONF servicevm_nova username nova
-    iniset $TACKER_CONF servicevm_nova password $SERVICE_PASSWORD
-    iniset $TACKER_CONF servicevm_nova user_domain_id default
-    iniset $TACKER_CONF servicevm_nova project_name $SERVICE_TENANT_NAME
-    iniset $TACKER_CONF servicevm_nova project_domain_id default
-    iniset $TACKER_CONF servicevm_nova region_name $REGION_NAME
+    iniset $TACKER_CONF tacker_nova auth_plugin password
+    iniset $TACKER_CONF tacker_nova auth_url $KEYSTONE_AUTH_URI
+    iniset $TACKER_CONF tacker_nova username nova
+    iniset $TACKER_CONF tacker_nova password $SERVICE_PASSWORD
+    iniset $TACKER_CONF tacker_nova user_domain_id default
+    iniset $TACKER_CONF tacker_nova project_name $SERVICE_TENANT_NAME
+    iniset $TACKER_CONF tacker_nova project_domain_id default
+    iniset $TACKER_CONF tacker_nova region_name $REGION_NAME
 
-    iniset $TACKER_CONF servicevm_heat heat_uri http://$SERVICE_HOST:8004/v1
-    iniset $TACKER_CONF servicevm_heat stack_retries 10
-    iniset $TACKER_CONF servicevm_heat stack_retry_wait 5
+    iniset $TACKER_CONF tacker_heat heat_uri http://$SERVICE_HOST:8004/v1
+    iniset $TACKER_CONF tacker_heat stack_retries 60
+    iniset $TACKER_CONF tacker_heat stack_retry_wait 5
 
     _tacker_setup_rootwrap
     echo "Creating bridge"
@@ -362,6 +339,28 @@ function tacker_horizon_install {
     setup_dev_lib "tacker-horizon"
     sudo cp $DEST/tacker-horizon/openstack_dashboard_extensions/* $DEST/horizon/openstack_dashboard/enabled/
     restart_apache_server
+}
+
+function tacker_create_openwrt_image {
+    local image_url=https://downloads.openwrt.org/chaos_calmer/15.05/x86/kvm_guest/openwrt-15.05-x86-kvm_guest-combined-ext4.img.gz
+    local image image_fname image_name
+
+    image_fname=`basename "$image_url"`
+    if [[ $image_url != file* ]]; then
+        if [[ ! -f $FILES/$image_fname || "$(stat -c "%s" $FILES/$image_fname)" = "0" ]]; then
+            wget --progress=dot:giga -c $image_url -O $FILES/$image_fname
+            if [[ $? -ne 0 ]]; then
+                echo "Not found: $image_url"
+                return
+            fi
+        fi
+        image="$FILES/${image_fname}"
+    fi
+    disk_format=raw
+    container_format=bare
+    image_name="OpenWRT"
+    openstack --os-cloud=devstack-admin image create $image_name --public --container-format=$container_format --disk-format $disk_format < <(zcat --force "${image}")
+    glance image-list | grep OpenWRT | awk {print$2}
 }
 
 function tacker_create_initial_network {

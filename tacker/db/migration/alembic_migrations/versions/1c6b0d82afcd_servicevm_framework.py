@@ -16,10 +16,8 @@
 #    WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
 #    License for the specific language governing permissions and limitations
 #    under the License.
-#
-# @author: Isaku Yamahata, Intel Corporation.
 
-"""add tables for servicevm framework
+"""add tables for tacker framework
 
 Revision ID: 1c6b0d82afcd
 Revises: 2db5203cb7a9

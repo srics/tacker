@@ -30,6 +30,7 @@ import socket
 import uuid
 
 from eventlet.green import subprocess
+import netaddr
 from oslo_config import cfg
 
 from tacker.common import constants as q_const
@@ -299,3 +300,11 @@ def cpu_count():
         return multiprocessing.cpu_count()
     except NotImplementedError:
         return 1
+
+
+def is_valid_ipv4(address):
+    """Verify that address represents a valid IPv4 address."""
+    try:
+        return netaddr.valid_ipv4(address)
+    except Exception:
+        return False

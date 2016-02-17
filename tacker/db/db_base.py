@@ -147,7 +147,7 @@ class CommonDbMixin(object):
     def _apply_dict_extend_functions(self, resource_type,
                                      response, db_object):
         for func in self._dict_extend_functions.get(
-            resource_type, []):
+                resource_type, []):
             args = (response, db_object)
             if isinstance(func, basestring):
                 func = getattr(self, func, None)
@@ -191,7 +191,9 @@ class CommonDbMixin(object):
         return None
 
     def _filter_non_model_columns(self, data, model):
-        """Remove all the attributes from data which are not columns of
+        """Removes attributes from data.
+
+        Remove all the attributes from data which are not columns of
         the model passed as second parameter.
         """
         columns = [c.name for c in model.__table__.columns]
